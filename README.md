@@ -149,8 +149,6 @@ Hunk 0 的偏移和补丁字节来自：
 
 [`GodKeawa/wemeet-bin-wayland-screenshare-fix`](https://github.com/GodKeawa/wemeet-bin-wayland-screenshare-fix)
 
-本仓库没有将 Hunk 0 描述为自行发明，也不分发腾讯会议二进制。
-
 ## 当前实测状态
 
 Guard 已通过合成测试，并在重启前后完成两轮真实屏幕共享测试。第二轮成功
