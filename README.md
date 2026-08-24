@@ -27,16 +27,19 @@ TOCTOU 竞态：检查完成后，映射可能在复制过程中被另一线程�
 1. **Portal 调用顺序——上游 Hunk 0**
    让腾讯会议等待异步 `SelectSources` 响应完成后再调用 `Start`，修复
    `Sources not selected`。
-2. **CPU 可读帧——XDPH `force_shm = 1`**
-   避免仅 DMA-BUF 的帧进入腾讯会议延迟 CPU 复制路径。没有启用 RGB/BGR
+2. **CPU 可读帧——PipeWire 标准 SHM 协商**
+   腾讯会议不发布 `SPA_FORMAT_VIDEO_modifier`，因此不能匹配 XDPH 带 mandatory
+   modifier 的 DMA-BUF 候选，只能匹配其 SHM fallback。真实 A/B 测试确认最终
+   buffer 为 `SPA_DATA_MemFd`，无需设置全局 `force_shm`。没有启用 RGB/BGR
    颜色交换。
 3. **生命周期安全——本仓库的 PipeWire Guard**
    在 PipeWire 仍保证帧有效时创建快照，保持镜像缓冲区长期映射，在 queue
    前恢复生产者原始指针，并拒绝 buffer 移除或 stream 销毁后的迟到 queue。
 
-Hunk 0、`straight` 和 `force_shm` 方案均来自上游。本仓库新增的工作是独立
-实现的 PipeWire buffer 生命周期守卫、mock/压力测试、严格版本校验、隔离
-启动器及相关文档。
+Hunk 0、`straight` 和最初用于排查的 `force_shm` 方案均来自上游。本仓库
+新增的工作是独立实现的 PipeWire buffer 生命周期守卫、mock/压力测试、严格
+版本校验、隔离启动器及相关文档。后续协议分析和真实 A/B 测试证明腾讯会议
+默认已经协商 SHM，因此正式方案不再要求全局 `force_shm`。
 
 ## PipeWire Guard 设计
 
@@ -96,22 +99,16 @@ mock PipeWire 测试覆盖：
 ## 安装与启动
 
 本动态库不能单独修复 Portal 调用顺序，也不能让 DMA-BUF 变为 CPU 可读。
-完整实验方案要求：Hunk 0、XDPH SHM、原版 `libxcast.so`，并且不能同时使用
-`straight` 或颜色交换 Hook。
+完整实验方案要求：Hunk 0、PipeWire 协商得到 `SPA_DATA_MemFd`、原版
+`libxcast.so`，并且不能同时使用 `straight` 或颜色交换 Hook。
 
-将以下配置合并到 `~/.config/hypr/xdph.conf`。如果文件已有其他设置，不要
-直接覆盖：
+不需要创建或修改 `~/.config/hypr/xdph.conf`。XDPH 默认同时发布 DMA-BUF
+候选和 SHM fallback；腾讯会议的无 modifier 格式会自动选择后者。全局
+`force_shm = 1` 会影响其他 Portal 应用，不属于本修复的安装步骤。
 
-```ini
-screencopy {
-    force_shm = 1
-}
-```
-
-重启 XDPH，然后执行测试：
+先执行测试：
 
 ```sh
-systemctl --user restart xdg-desktop-portal-hyprland.service
 make clean test
 ```
 
@@ -121,10 +118,9 @@ make clean test
 ./tools/run-guarded.sh
 ```
 
-启动器会检查 XDPH 设置和三个腾讯会议文件的哈希。它在 `/tmp` 中创建经过
-验证的 Hunk 0 副本，并且只在腾讯会议 bubblewrap mount namespace 内覆盖
-该文件，因此主机软件包保持原版。系统重启导致 `/tmp` 清空后，启动器会自动
-重新编译 Guard。
+启动器会检查三个腾讯会议文件的哈希。它在 `/tmp` 中创建经过验证的 Hunk 0
+副本，并且只在腾讯会议 bubblewrap mount namespace 内覆盖该文件，因此主机
+软件包保持原版。系统重启导致 `/tmp` 清空后，启动器会自动重新编译 Guard。
 
 普通 `wemeet` 命令仍会启动未修复的官方版本。腾讯自带的
 `libwemeetwrap.so` 必须位于 `LD_PRELOAD` 首位；若 Guard 排在它前面，会
@@ -155,6 +151,12 @@ Guard 已通过合成测试，并在重启前后完成两轮真实屏幕共享�
 接收并编码超过 700 帧 `1920×1080` 画面，停止共享正常，且没有产生 Wemeet
 core dump。第一轮初始协商期间出现两次瞬时 XDPH `Out of buffers`，随后自动
 恢复并正常共享。
+
+另一次关闭全局 `force_shm` 的真实 A/B 测试连续完成两轮开始和停止共享。
+Guard 在实际 `add_buffer` 事件中确认 `n_datas=1`、`spa_data.type=2`，即
+`SPA_DATA_MemFd`；XDPH 同时记录 `Building modifiers for dma` 和随后实际请求
+`wl_shm` buffer。这证明前一条日志只是发布 DMA 候选，并不表示腾讯会议最终
+使用 DMA-BUF。本次测试同样没有产生 Wemeet core dump。
 
 这些结果是有希望的开发阶段证据，但还不能视为长期稳定性保证。欢迎在严格
 匹配版本的前提下测试并提交不包含私人数据的日志摘要或问题报告。
