@@ -1,7 +1,12 @@
 # Wemeet PipeWire buffer guard (experimental)
 
 An experimental lifetime guard for Tencent Meeting `3.26.10.401-5` on Hyprland/XDPH.
-It contains no Tencent binaries.
+It contains no Tencent binaries, build products, core dumps or private logs.
+
+> **Exact-version lock:** the patch and launcher support only Arch/CachyOS
+> `wemeet-bin 3.26.10.401-5` with the validated SHA-256 hashes embedded in
+> `tools/stage_hunk0.py` and `tools/run-guarded.sh`. They refuse every other
+> binary. Re-audit all offsets after any Wemeet update.
 
 ## Problem addressed
 
@@ -15,6 +20,22 @@ failures included:
 
 The previous `straight` hook checked a mapping with `msync()` and then copied it.
 That is a TOCTOU check: the mapping can disappear while the copy is running.
+
+## What the complete fix does
+
+The working experiment has three distinct layers:
+
+1. **Portal ordering — upstream Hunk 0.** Makes Wemeet wait for the asynchronous
+   `SelectSources` response before calling `Start`, fixing `Sources not selected`.
+2. **CPU-readable frames — XDPH `force_shm = 1`.** Prevents a DMA-BUF-only path
+   from reaching Tencent's delayed CPU copy. No RGB/BGR swap is enabled.
+3. **Lifetime safety — this PipeWire guard.** Snapshots a frame while PipeWire
+   still guarantees it is valid, keeps the mirror mapped, restores the producer
+   pointer before queueing, and rejects queue operations after removal/destruction.
+
+Hunk 0 and the prior `straight`/`force_shm` approaches originate upstream. This
+repository's new work is the independently implemented PipeWire lifetime guard,
+its mock/stress tests, strict version checks, sandbox launcher and documentation.
 
 ## Design
 
@@ -43,6 +64,14 @@ buffer receives `-EPIPE`; the real `pw_stream_queue_buffer()` is not called.
 Activation requires `WEMEET_PW_GUARD=1`; merely loading the library leaves all
 `dlsym()` results untouched.
 
+## Requirements
+
+- x86-64 Arch/CachyOS with Hyprland and `xdg-desktop-portal-hyprland`;
+- exact `wemeet-bin 3.26.10.401-5` binaries checked by the launcher;
+- PipeWire development headers, a C compiler, `make`, `pkg-config`, Python 3 and
+  bubblewrap;
+- `desktop-file-utils` only for desktop-entry validation/cache refresh.
+
 ## Build and tests
 
 Build products and test binaries intentionally go to `/tmp`:
@@ -65,29 +94,57 @@ processes, and 300 full-size `2560×1440×4` frame cycles. ThreadSanitizer canno
 initialize with a custom `dlsym()` interposer even when this guard is disabled,
 so the deterministic concurrent-destroy test is used for that path.
 
-## Required companion changes
+## Install and launch
 
-This library does **not** fix Portal call ordering or make DMA-BUF CPU-readable.
-A controlled test additionally needs:
+This library does **not** fix Portal call ordering or make DMA-BUF CPU-readable by
+itself. The complete experiment requires Hunk 0, XDPH SHM, original `libxcast.so`,
+and no `straight`/color-swap hook.
 
-1. Hunk 0 only in `libscreen_share_module.so`;
-2. XDPH `force_shm = 1`;
-3. original, unpatched `libxcast.so`;
-4. no `straight`/`swap` hook.
+Add the following block to `~/.config/hypr/xdph.conf` (merge it with any existing
+configuration rather than overwriting unrelated settings):
 
-`tools/stage_hunk0.py` creates a validated staged copy and refuses in-place edits.
-`tools/run-guarded.sh` overlays that copy only inside Wemeet's bubblewrap mount
-namespace, so the host package remains byte-for-byte original. It also rebuilds
-the `/tmp` runtime library automatically after a reboot. Start the experiment with:
+```ini
+screencopy {
+    force_shm = 1
+}
+```
+
+Then restart XDPH and run the tests:
 
 ```sh
-~/Projects/wemeet-pw-guard/tools/run-guarded.sh
+systemctl --user restart xdg-desktop-portal-hyprland.service
+make clean test
 ```
+
+Launch the guarded instance from the repository:
+
+```sh
+./tools/run-guarded.sh
+```
+
+The launcher validates the XDPH setting and all three Wemeet hashes. It creates a
+validated Hunk 0 copy in `/tmp` and overlays that copy only inside Wemeet's
+bubblewrap mount namespace, leaving the host package byte-for-byte original. It
+also rebuilds the `/tmp` guard automatically after a reboot.
 
 Do not use the normal `wemeet` launcher for a guarded test. Tencent's
 `libwemeetwrap.so` must remain first in `LD_PRELOAD`; placing the guard first
-breaks the wrapper's `RTLD_NEXT` lookups and leaves Wemeet without a visible UI.
-The only host-side runtime setting needed is the removable XDPH SHM configuration.
+breaks its `RTLD_NEXT` lookups and leaves Wemeet without a visible UI.
+
+Optionally install a separate application-menu entry without replacing the
+official launcher:
+
+```sh
+./tools/install-desktop-entry.sh
+```
+
+It appears as **Tencent Meeting (Wayland Guard)** / **腾讯会议（Wayland 修复版）**.
+Remove that desktop entry with:
+
+```sh
+rm -f ~/.local/share/applications/wemeet-wayland-guard.desktop
+update-desktop-database ~/.local/share/applications
+```
 
 The Hunk 0 offsets and bytes are from
 [`GodKeawa/wemeet-bin-wayland-screenshare-fix`](https://github.com/GodKeawa/wemeet-bin-wayland-screenshare-fix),

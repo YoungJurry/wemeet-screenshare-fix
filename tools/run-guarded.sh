@@ -8,11 +8,17 @@ GUARD=${WEMEET_PW_GUARD_LIBRARY:-$DEFAULT_GUARD}
 ORIGINAL_MODULE=/opt/wemeet/bin/modules/screen_share/libscreen_share_module.so
 SANDBOX_MODULE=$ORIGINAL_MODULE
 XCAST=/usr/lib/wemeet/libxcast.so
+XDPH_CONFIG=${XDG_CONFIG_HOME:-$HOME/.config}/hypr/xdph.conf
 RUNTIME_DIR=/tmp/wemeet-pw-guard-runtime-$(id -u)
 PATCHED_MODULE=$RUNTIME_DIR/libscreen_share_module.so
 
 [ -x /usr/bin/bwrap ] || {
     echo "Refusing: bubblewrap is required for an isolated Hunk 0 overlay." >&2
+    exit 1
+}
+[ -r "$XDPH_CONFIG" ] && grep -Eq \
+    '^[[:space:]]*force_shm[[:space:]]*=[[:space:]]*1([[:space:]]|$)' "$XDPH_CONFIG" || {
+    echo "Refusing: XDPH force_shm = 1 is not configured in $XDPH_CONFIG" >&2
     exit 1
 }
 if [ ! -r "$GUARD" ] && [ "$GUARD" = "$DEFAULT_GUARD" ]; then
