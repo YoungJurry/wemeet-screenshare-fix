@@ -77,8 +77,17 @@ A controlled test additionally needs:
 
 `tools/stage_hunk0.py` creates a validated staged copy and refuses in-place edits.
 `tools/run-guarded.sh` overlays that copy only inside Wemeet's bubblewrap mount
-namespace, so the host package remains byte-for-byte original. The only host-side
-runtime setting needed for the first test is the removable XDPH SHM configuration.
+namespace, so the host package remains byte-for-byte original. It also rebuilds
+the `/tmp` runtime library automatically after a reboot. Start the experiment with:
+
+```sh
+~/Projects/wemeet-pw-guard/tools/run-guarded.sh
+```
+
+Do not use the normal `wemeet` launcher for a guarded test. Tencent's
+`libwemeetwrap.so` must remain first in `LD_PRELOAD`; placing the guard first
+breaks the wrapper's `RTLD_NEXT` lookups and leaves Wemeet without a visible UI.
+The only host-side runtime setting needed is the removable XDPH SHM configuration.
 
 The Hunk 0 offsets and bytes are from
 [`GodKeawa/wemeet-bin-wayland-screenshare-fix`](https://github.com/GodKeawa/wemeet-bin-wayland-screenshare-fix),
@@ -86,5 +95,6 @@ not independently invented here.
 
 ## Current status
 
-The guard passes synthetic tests but has not yet passed a real Tencent Meeting
-sharing test. Treat it as development code, not a stable fix.
+The guard passes synthetic tests and one real screen-sharing run. Reboot and
+stream teardown/restart validation are still in progress. Treat it as development
+code, not a stable fix.

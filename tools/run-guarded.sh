@@ -3,7 +3,8 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
-GUARD=${WEMEET_PW_GUARD_LIBRARY:-/tmp/wemeet-pw-guard-build/libwemeet_pw_guard.so}
+DEFAULT_GUARD=/tmp/wemeet-pw-guard-build/libwemeet_pw_guard.so
+GUARD=${WEMEET_PW_GUARD_LIBRARY:-$DEFAULT_GUARD}
 ORIGINAL_MODULE=/opt/wemeet/bin/modules/screen_share/libscreen_share_module.so
 SANDBOX_MODULE=$ORIGINAL_MODULE
 XCAST=/usr/lib/wemeet/libxcast.so
@@ -14,9 +15,12 @@ PATCHED_MODULE=$RUNTIME_DIR/libscreen_share_module.so
     echo "Refusing: bubblewrap is required for an isolated Hunk 0 overlay." >&2
     exit 1
 }
+if [ ! -r "$GUARD" ] && [ "$GUARD" = "$DEFAULT_GUARD" ]; then
+    echo "[wemeet-pw-guard] rebuilding runtime library after reboot" >&2
+    make -C "$PROJECT_DIR" all >&2
+fi
 [ -r "$GUARD" ] || {
     echo "Guard library not found: $GUARD" >&2
-    echo "Build it with: make -C $PROJECT_DIR all" >&2
     exit 1
 }
 
@@ -73,11 +77,14 @@ KDE_ICON_CACHE_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/icon-cache.kcache"
 WEMEET_APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/wemeetapp"
 mkdir -p "$WEMEET_APP_DIR"
 
+GUARD_ACTIVE=${WEMEET_PW_GUARD:-1}
 case ":${LD_PRELOAD:-}:" in
     *":$GUARD:"*) preload=${LD_PRELOAD:-} ;;
     *) preload="$GUARD${LD_PRELOAD:+:$LD_PRELOAD}" ;;
 esac
-LD_PRELOAD_WRAP="$preload:/usr/lib/wemeet/libwemeetwrap.so"
+# Keep Tencent's wrapper first. Its RTLD_NEXT lookups must pass this guard before
+# the guard forwards them to glibc's real dlsym implementation.
+LD_PRELOAD_WRAP="/usr/lib/wemeet/libwemeetwrap.so:$preload"
 
 echo "[wemeet-pw-guard] host package remains original; Hunk 0 is sandbox-only" >&2
 exec /usr/bin/bwrap \
@@ -97,6 +104,6 @@ exec /usr/bin/bwrap \
     --ro-bind-try "$FONTCONFIG_DIR" "$FONTCONFIG_DIR" \
     --bind-try "$KDE_ICON_CACHE_FILE" "$KDE_ICON_CACHE_FILE" \
     --bind "$WEMEET_APP_DIR" "$WEMEET_APP_DIR" \
-    --setenv WEMEET_PW_GUARD 1 \
+    --setenv WEMEET_PW_GUARD "$GUARD_ACTIVE" \
     --setenv LD_PRELOAD "$LD_PRELOAD_WRAP" \
     /opt/wemeet/bin/wemeetapp "$@"
