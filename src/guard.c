@@ -101,9 +101,23 @@ static int (*real_pw_stream_queue_buffer)(struct pw_stream *,
 static void *(*real_dlsym_fn)(void *, const char *);
 static pthread_once_t dlsym_once = PTHREAD_ONCE_INIT;
 
+static void write_stderr(const char *text, size_t length) {
+  while (text != NULL && length > 0) {
+    const ssize_t result = write(STDERR_FILENO, text, length);
+    if (result > 0) {
+      text += (size_t)result;
+      length -= (size_t)result;
+    } else if (result < 0 && errno == EINTR) {
+      continue;
+    } else {
+      break;
+    }
+  }
+}
+
 static void log_literal(const char *text) {
   if (text != NULL)
-    (void)write(STDERR_FILENO, text, strlen(text));
+    write_stderr(text, strlen(text));
 }
 
 static void init_real_dlsym(void) {
@@ -658,7 +672,7 @@ __attribute__((destructor)) static void guard_fini(void) {
                atomic_load_explicit(&stat_dropped_queues, memory_order_relaxed),
                atomic_load_explicit(&stat_copy_failures, memory_order_relaxed));
   if (length > 0)
-    (void)write(STDERR_FILENO, message,
-                (size_t)length < sizeof(message) ? (size_t)length
-                                                 : sizeof(message) - 1u);
+    write_stderr(message, (size_t)length < sizeof(message)
+                              ? (size_t)length
+                              : sizeof(message) - 1u);
 }
