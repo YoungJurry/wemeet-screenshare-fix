@@ -1,0 +1,102 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
+GUARD=${WEMEET_PW_GUARD_LIBRARY:-/tmp/wemeet-pw-guard-build/libwemeet_pw_guard.so}
+ORIGINAL_MODULE=/opt/wemeet/bin/modules/screen_share/libscreen_share_module.so
+SANDBOX_MODULE=$ORIGINAL_MODULE
+XCAST=/usr/lib/wemeet/libxcast.so
+RUNTIME_DIR=/tmp/wemeet-pw-guard-runtime-$(id -u)
+PATCHED_MODULE=$RUNTIME_DIR/libscreen_share_module.so
+
+[ -x /usr/bin/bwrap ] || {
+    echo "Refusing: bubblewrap is required for an isolated Hunk 0 overlay." >&2
+    exit 1
+}
+[ -r "$GUARD" ] || {
+    echo "Guard library not found: $GUARD" >&2
+    echo "Build it with: make -C $PROJECT_DIR all" >&2
+    exit 1
+}
+
+original_hash=$(sha256sum "$ORIGINAL_MODULE"); original_hash=${original_hash%% *}
+xcast_hash=$(sha256sum "$XCAST"); xcast_hash=${xcast_hash%% *}
+launcher_hash=$(sha256sum /usr/bin/wemeet); launcher_hash=${launcher_hash%% *}
+
+[ "$original_hash" = 925e7c16a5d69adaa804d1ea55aac1edc4093aacb5324948ea6f38a71abd4e16 ] || {
+    echo "Refusing: host screen-share module is not original ($original_hash)." >&2
+    exit 1
+}
+[ "$xcast_hash" = 472a4c59b2ea9db68fcbc13cf477d4795a58353b5fe7716793f407cd5b8b174a ] || {
+    echo "Refusing: libxcast.so is not original ($xcast_hash)." >&2
+    exit 1
+}
+[ "$launcher_hash" = d6e4a6edcf2fca7dcca347bb24aa3be61924a9efa2013893c5e40f13a8ea354c ] || {
+    echo "Refusing: /usr/bin/wemeet is not the validated package launcher." >&2
+    exit 1
+}
+
+mkdir -p "$RUNTIME_DIR"
+patched_hash=
+if [ -r "$PATCHED_MODULE" ]; then
+    patched_hash=$(sha256sum "$PATCHED_MODULE"); patched_hash=${patched_hash%% *}
+fi
+if [ "$patched_hash" != 075aef4471ed8ea87f0c9c95995981358087265987d05b656d3bf0b8a5f8f418 ]; then
+    rm -f -- "$PATCHED_MODULE"
+    "$SCRIPT_DIR/stage_hunk0.py" "$ORIGINAL_MODULE" "$PATCHED_MODULE"
+fi
+
+if [ "${WEMEET_PW_GUARD_VALIDATE_ONLY:-0}" = 1 ]; then
+    exec /usr/bin/bwrap \
+        --unshare-user-try --unshare-pid \
+        --proc /proc \
+        --ro-bind / / \
+        --ro-bind "$PATCHED_MODULE" "$SANDBOX_MODULE" \
+        /usr/bin/sha256sum "$SANDBOX_MODULE"
+fi
+
+export QT_AUTO_SCREEN_SCALE_FACTOR=1
+export QT_STYLE_OVERRIDE=fusion
+export IBUS_USE_PORTAL=1
+export LD_LIBRARY_PATH="/usr/lib/wemeet:${LD_LIBRARY_PATH:-/usr/lib}"
+export QT_QPA_PLATFORM=xcb
+export XDG_SESSION_TYPE=x11
+unset WAYLAND_DISPLAY
+export WEMEET_XWAYLAND=1
+
+USER_RUN_DIR="/run/user/$(id -u)"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
+FONTCONFIG_DIR="$CONFIG_DIR/fontconfig"
+KDE_GLOBALS_FILE="$CONFIG_DIR/kdeglobals"
+KDE_ICON_CACHE_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/icon-cache.kcache"
+WEMEET_APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/wemeetapp"
+mkdir -p "$WEMEET_APP_DIR"
+
+case ":${LD_PRELOAD:-}:" in
+    *":$GUARD:"*) preload=${LD_PRELOAD:-} ;;
+    *) preload="$GUARD${LD_PRELOAD:+:$LD_PRELOAD}" ;;
+esac
+LD_PRELOAD_WRAP="$preload:/usr/lib/wemeet/libwemeetwrap.so"
+
+echo "[wemeet-pw-guard] host package remains original; Hunk 0 is sandbox-only" >&2
+exec /usr/bin/bwrap \
+    --new-session \
+    --unshare-user-try --unshare-pid --unshare-uts --unshare-cgroup-try \
+    --proc /proc \
+    --ro-bind / / \
+    --ro-bind "$PATCHED_MODULE" "$SANDBOX_MODULE" \
+    --dev-bind /dev /dev \
+    --bind /tmp /tmp \
+    --ro-bind /dev/null /proc/cpuinfo \
+    --tmpfs /sys/devices/virtual \
+    --bind "$USER_RUN_DIR" "$USER_RUN_DIR" \
+    --tmpfs /var \
+    --tmpfs "$CONFIG_DIR" \
+    --ro-bind-try "$KDE_GLOBALS_FILE" "$KDE_GLOBALS_FILE" \
+    --ro-bind-try "$FONTCONFIG_DIR" "$FONTCONFIG_DIR" \
+    --bind-try "$KDE_ICON_CACHE_FILE" "$KDE_ICON_CACHE_FILE" \
+    --bind "$WEMEET_APP_DIR" "$WEMEET_APP_DIR" \
+    --setenv WEMEET_PW_GUARD 1 \
+    --setenv LD_PRELOAD "$LD_PRELOAD_WRAP" \
+    /opt/wemeet/bin/wemeetapp "$@"
