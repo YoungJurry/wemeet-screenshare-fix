@@ -3,24 +3,64 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
-DEFAULT_GUARD=/tmp/wemeet-pw-guard-build/libwemeet_pw_guard.so
-GUARD=${WEMEET_PW_GUARD_LIBRARY:-$DEFAULT_GUARD}
+SYSTEM_LIB_DIR=${WEMEET_FIX_LIB_DIR:-/usr/lib/wemeet-screenshare-fix}
+DEVELOPMENT_GUARD=/tmp/wemeet-pw-guard-build/libwemeet_pw_guard.so
+
+if [ -n "${WEMEET_PW_GUARD_LIBRARY:-}" ]; then
+    GUARD=$WEMEET_PW_GUARD_LIBRARY
+elif [ -r "$SYSTEM_LIB_DIR/libwemeet_pw_guard.so" ]; then
+    GUARD=$SYSTEM_LIB_DIR/libwemeet_pw_guard.so
+else
+    GUARD=$DEVELOPMENT_GUARD
+fi
+
+if [ -n "${WEMEET_HUNK0_TOOL:-}" ]; then
+    HUNK0_TOOL=$WEMEET_HUNK0_TOOL
+elif [ -x "$SYSTEM_LIB_DIR/stage_hunk0.py" ]; then
+    HUNK0_TOOL=$SYSTEM_LIB_DIR/stage_hunk0.py
+else
+    HUNK0_TOOL=$SCRIPT_DIR/stage_hunk0.py
+fi
+
 ORIGINAL_MODULE=/opt/wemeet/bin/modules/screen_share/libscreen_share_module.so
 SANDBOX_MODULE=$ORIGINAL_MODULE
 XCAST=/usr/lib/wemeet/libxcast.so
-RUNTIME_DIR=/tmp/wemeet-pw-guard-runtime-$(id -u)
+RUNTIME_PARENT=${XDG_RUNTIME_DIR:-/tmp}
+RUNTIME_DIR=$(mktemp -d "$RUNTIME_PARENT/wemeet-screenshare-fix-$(id -u).XXXXXX")
 PATCHED_MODULE=$RUNTIME_DIR/libscreen_share_module.so
+
+cleanup() {
+    rm -f -- "$PATCHED_MODULE"
+    rmdir -- "$RUNTIME_DIR" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 [ -x /usr/bin/bwrap ] || {
     echo "Refusing: bubblewrap is required for an isolated Hunk 0 overlay." >&2
     exit 1
 }
-if [ ! -r "$GUARD" ] && [ "$GUARD" = "$DEFAULT_GUARD" ]; then
-    echo "[wemeet-pw-guard] rebuilding runtime library after reboot" >&2
+installed_package=$(/usr/bin/pacman -Q wemeet-bin 2>/dev/null || true)
+[ "$installed_package" = "wemeet-bin 3.26.10.401-5" ] || {
+    echo "Refusing: expected wemeet-bin 3.26.10.401-5, found: ${installed_package:-not installed}." >&2
+    exit 1
+}
+if [ ! -r "$GUARD" ] && [ "$GUARD" = "$DEVELOPMENT_GUARD" ]; then
+    [ -f "$PROJECT_DIR/Makefile" ] || {
+        echo "Guard library not found and this is not a development checkout: $GUARD" >&2
+        exit 1
+    }
+    echo "[wemeet-pw-guard] rebuilding development library after reboot" >&2
     make -C "$PROJECT_DIR" all >&2
 fi
 [ -r "$GUARD" ] || {
     echo "Guard library not found: $GUARD" >&2
+    exit 1
+}
+[ -x "$HUNK0_TOOL" ] || {
+    echo "Hunk 0 staging tool not found: $HUNK0_TOOL" >&2
     exit 1
 }
 
@@ -48,16 +88,17 @@ if [ -r "$PATCHED_MODULE" ]; then
 fi
 if [ "$patched_hash" != 075aef4471ed8ea87f0c9c95995981358087265987d05b656d3bf0b8a5f8f418 ]; then
     rm -f -- "$PATCHED_MODULE"
-    "$SCRIPT_DIR/stage_hunk0.py" "$ORIGINAL_MODULE" "$PATCHED_MODULE"
+    "$HUNK0_TOOL" "$ORIGINAL_MODULE" "$PATCHED_MODULE"
 fi
 
 if [ "${WEMEET_PW_GUARD_VALIDATE_ONLY:-0}" = 1 ]; then
-    exec /usr/bin/bwrap \
+    /usr/bin/bwrap \
         --unshare-user-try --unshare-pid \
         --proc /proc \
         --ro-bind / / \
         --ro-bind "$PATCHED_MODULE" "$SANDBOX_MODULE" \
         /usr/bin/sha256sum "$SANDBOX_MODULE"
+    exit 0
 fi
 
 export QT_AUTO_SCREEN_SCALE_FACTOR=1
@@ -87,7 +128,7 @@ esac
 LD_PRELOAD_WRAP="/usr/lib/wemeet/libwemeetwrap.so:$preload"
 
 echo "[wemeet-pw-guard] host package remains original; Hunk 0 is sandbox-only" >&2
-exec /usr/bin/bwrap \
+/usr/bin/bwrap \
     --new-session \
     --unshare-user-try --unshare-pid --unshare-uts --unshare-cgroup-try \
     --proc /proc \

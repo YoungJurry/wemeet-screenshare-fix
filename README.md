@@ -118,9 +118,20 @@ make clean test
 ./tools/run-guarded.sh
 ```
 
-启动器会检查三个腾讯会议文件的哈希。它在 `/tmp` 中创建经过验证的 Hunk 0
-副本，并且只在腾讯会议 bubblewrap mount namespace 内覆盖该文件，因此主机
-软件包保持原版。系统重启导致 `/tmp` 清空后，启动器会自动重新编译 Guard。
+启动器会检查已安装包必须为 `wemeet-bin 3.26.10.401-5`，并验证三个腾讯
+会议文件的哈希。它在 `$XDG_RUNTIME_DIR` 的唯一临时目录中创建经过验证的
+Hunk 0 副本，并且只在腾讯会议 bubblewrap mount namespace 内覆盖该文件，
+因此主机软件包保持原版。腾讯会议退出后，启动器会删除该临时副本。
+
+从源码运行时，Guard 编译产物仍只写入 `/tmp`，重启后由启动器自动重建。
+系统包则可执行：
+
+```sh
+make BUILD_DIR="$PWD/build" DESTDIR="$pkgdir" install
+```
+
+将 Guard、Hunk 0 staging 工具、系统启动器和独立 desktop 安装到标准 `/usr`
+路径；该安装目标同样不会修改腾讯会议文件或任何用户配置。
 
 普通 `wemeet` 命令仍会启动未修复的官方版本。腾讯自带的
 `libwemeetwrap.so` 必须位于 `LD_PRELOAD` 首位；若 Guard 排在它前面，会

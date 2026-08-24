@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Tencent Meeting (Wayland Guard)
+Name[zh_CN]=腾讯会议（Wayland 修复版）
+Comment=Launch Tencent Meeting with sandboxed Hunk 0 and PipeWire buffer guard
+Comment[zh_CN]=使用沙箱 Hunk 0 与 PipeWire 缓冲守卫启动腾讯会议
+Exec=/usr/bin/wemeet-wayland-guard %u
+Icon=wemeet
+Terminal=false
+Categories=AudioVideo;
+Keywords=wemeet;tencent;meeting;wayland;pipewire;screen share;
+StartupWMClass=wemeetapp
