@@ -74,6 +74,43 @@ PipeWire API。
   bubblewrap；
 - `desktop-file-utils` 仅用于校验桌面入口和刷新应用菜单缓存。
 
+## Arch/CachyOS 软件包安装
+
+仓库在 [`packaging/arch/`](packaging/arch/) 中提供固定版本的 `PKGBUILD`。
+它只下载并构建本仓库的 MIT 源码，不包含或重新分发腾讯会议二进制。
+
+先安装 `base-devel`，并确保已安装的腾讯会议版本严格匹配：
+
+```sh
+pacman -Q wemeet-bin
+# 必须输出：wemeet-bin 3.26.10.401-5
+```
+
+`wemeet-bin` 是 AUR 依赖，若尚未安装，需要先通过 AUR helper 安装；随后构建
+并安装本修复包：
+
+```sh
+git clone https://github.com/YoungJurry/wemeet-screenshare-fix.git
+cd wemeet-screenshare-fix/packaging/arch
+makepkg -si
+```
+
+安装后可从应用菜单启动 **腾讯会议（Wayland 修复版）**，也可以运行：
+
+```sh
+wemeet-wayland-guard
+```
+
+官方腾讯会议入口保持不变。卸载修复包不会修改或删除腾讯会议文件及用户
+XDPH 配置：
+
+```sh
+sudo pacman -Rns wemeet-screenshare-fix
+```
+
+在 AUR 包正式发布前，这种本地 `makepkg -si` 安装方式不会被 `yay -Syu`
+自动升级；更新时需要重新拉取本仓库并构建。
+
 ## 构建与测试
 
 编译产物和测试二进制只会写入 `/tmp`：

@@ -1,0 +1,33 @@
+# Maintainer: YoungJurry <YoungJurry@users.noreply.github.com>
+pkgname=wemeet-screenshare-fix
+pkgver=0.1.1
+pkgrel=1
+pkgdesc='Wayland screen-share lifecycle guard for Tencent Meeting 3.26.10.401'
+arch=('x86_64')
+url='https://github.com/YoungJurry/wemeet-screenshare-fix'
+license=('MIT')
+depends=(
+  'bubblewrap'
+  'glibc'
+  'pipewire'
+  'python'
+  'wemeet-bin=3.26.10.401-5'
+  'xdg-desktop-portal-hyprland'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('383e023a13f069e50dbeb4638dcef013674d592f1cf822d256a235327dfc3be9')
+
+build() {
+  make -C "$pkgname-$pkgver" BUILD_DIR="$srcdir/build" all
+}
+
+check() {
+  make -C "$pkgname-$pkgver" BUILD_DIR="$srcdir/build" test
+}
+
+package() {
+  make -C "$pkgname-$pkgver" \
+    BUILD_DIR="$srcdir/build" \
+    DESTDIR="$pkgdir" \
+    install
+}
