@@ -95,6 +95,9 @@ not independently invented here.
 
 ## Current status
 
-The guard passes synthetic tests and one real screen-sharing run. Reboot and
-stream teardown/restart validation are still in progress. Treat it as development
-code, not a stable fix.
+The guard passes synthetic tests and two real screen-sharing runs on either side
+of a reboot. The second run delivered and encoded more than 700 `1920×1080`
+frames and stopped cleanly, with no Wemeet core dump. The first run contained two
+transient XDPH `Out of buffers` messages during initial renegotiation but recovered
+and shared normally. Treat this as promising development evidence, not yet a
+long-term stability guarantee.
