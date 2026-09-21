@@ -72,10 +72,23 @@ launcher_hash=$(sha256sum /usr/bin/wemeet); launcher_hash=${launcher_hash%% *}
     echo "Refusing: host screen-share module is not original ($original_hash)." >&2
     exit 1
 }
-[ "$xcast_hash" = 472a4c59b2ea9db68fcbc13cf477d4795a58353b5fe7716793f407cd5b8b174a ] || {
-    echo "Refusing: libxcast.so is not original ($xcast_hash)." >&2
-    exit 1
-}
+# The AUR recipe rewrites RUNPATH with patchelf. Different patchelf releases
+# produce byte-distinct ELF layouts from the same official libxcast.so, so
+# accept only the exact, reproducible outputs verified from that source file.
+case "$xcast_hash" in
+    # Verified with patchelf 0.14.5, 0.15.0, 0.16.0 and 0.16.1.
+    53d5c38636d9235b28f6944c1c53a42b3292e27ffa81a550285c46cf1abba522) ;;
+    # Verified with patchelf 0.17.0, 0.17.1 and 0.17.2.
+    b3eddceebbeaa0b4bc4e2e84d66affdf061f862f9ce1fecc52e647d232ec94b2) ;;
+    # Verified with patchelf 0.18.0.
+    d242e9813f4c2eb694597a31648ffbb251c95660cb20853fb9bc1dde4d895439) ;;
+    # Verified with patchelf 0.19.0 and 0.19.1.
+    472a4c59b2ea9db68fcbc13cf477d4795a58353b5fe7716793f407cd5b8b174a) ;;
+    *)
+        echo "Refusing: libxcast.so is not a validated package build ($xcast_hash)." >&2
+        exit 1
+        ;;
+esac
 [ "$launcher_hash" = d6e4a6edcf2fca7dcca347bb24aa3be61924a9efa2013893c5e40f13a8ea354c ] || {
     echo "Refusing: /usr/bin/wemeet is not the validated package launcher." >&2
     exit 1
