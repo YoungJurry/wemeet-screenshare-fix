@@ -89,10 +89,6 @@ PipeWire API。
 
 ## Arch/CachyOS 软件包安装
 
-> 当前 `packaging/arch/PKGBUILD` 仍固定下载已发布的 `v0.1.2`，**不包含
-> 本分支的新 UI 守卫**。要测试本次悬停修复，请按下面“安装与启动”从
-> 当前 checkout 运行。发布新标签并更新归档哈希前，不能用旧包代替测试。
-
 仓库在 [`packaging/arch/`](packaging/arch/) 中提供固定版本的 `PKGBUILD`。
 它只下载并构建本仓库的 MIT 源码，不包含或重新分发腾讯会议二进制。
 
@@ -191,10 +187,9 @@ make clean test
 `WEMEET_PW_GUARD_VALIDATE_ONLY=1 ./tools/run-guarded.sh` 只校验副本与挂载，
 不启动腾讯会议。
 
-checkout 启动时优先使用当前源码和 staging 工具，不会静默使用旧安装包。
+checkout 启动时优先使用当前源码及 staging 工具，不会静默使用旧安装包。
 `WEMEET_PW_GUARD_BUILD_DIR=/tmp/独立目录` 可设置开发 Guard 的编译位置。
-现有 `v0.1.2` 包的归档没有新增 UI 补丁；正式发布新版本前请从 checkout
-运行，不要将旧发布包视作包含这次修改。
+新发布的 `v0.1.3` 包含此 UI 布局回调守卫。
 
 从源码运行时，Guard 编译产物默认仍只写入 `/tmp`，启动器通过 `make`
 按需重建。

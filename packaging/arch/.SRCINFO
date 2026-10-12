@@ -1,17 +1,18 @@
 pkgbase = wemeet-screenshare-fix
 	pkgdesc = Wayland screen-share lifecycle guard for Tencent Meeting 3.26.10.401
-	pkgver = 0.1.2
+	pkgver = 0.1.3
 	pkgrel = 1
 	url = https://github.com/YoungJurry/wemeet-screenshare-fix
 	arch = x86_64
 	license = MIT
 	depends = bubblewrap
 	depends = glibc
+	depends = gcc-libs
 	depends = pipewire
 	depends = python
 	depends = wemeet-bin=3.26.10.401-5
 	depends = xdg-desktop-portal-hyprland
-	source = wemeet-screenshare-fix-0.1.2.tar.gz::https://github.com/YoungJurry/wemeet-screenshare-fix/archive/refs/tags/v0.1.2.tar.gz
-	sha256sums = 014396799512ead5284675fb46806cda0aa6403dd367e4df6c820926838b84af
+	source = wemeet-screenshare-fix-0.1.3.tar.gz::https://github.com/YoungJurry/wemeet-screenshare-fix/archive/refs/tags/v0.1.3.tar.gz
+	sha256sums = 3492ae48998f833685bc89c0e00dbe40a41696bb72516f4064ba5ac928b55031
 
 pkgname = wemeet-screenshare-fix
