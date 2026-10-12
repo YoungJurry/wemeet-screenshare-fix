@@ -4,33 +4,57 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
 SYSTEM_LIB_DIR=${WEMEET_FIX_LIB_DIR:-/usr/lib/wemeet-screenshare-fix}
-DEVELOPMENT_GUARD=/tmp/wemeet-pw-guard-build/libwemeet_pw_guard.so
+DEVELOPMENT_BUILD_DIR=${WEMEET_PW_GUARD_BUILD_DIR:-/tmp/wemeet-pw-guard-build}
+DEVELOPMENT_GUARD=$DEVELOPMENT_BUILD_DIR/libwemeet_pw_guard.so
+TOOLTIP_FIX=${WEMEET_TOOLTIP_FIX:-1}
+case "$TOOLTIP_FIX" in
+    0|1) ;;
+    *) echo "Refusing: WEMEET_TOOLTIP_FIX must be 0 or 1." >&2; exit 1 ;;
+esac
 
 if [ -n "${WEMEET_PW_GUARD_LIBRARY:-}" ]; then
     GUARD=$WEMEET_PW_GUARD_LIBRARY
+elif [ -f "$PROJECT_DIR/src/guard.c" ] && [ -f "$PROJECT_DIR/Makefile" ]; then
+    # A checkout must not silently run an older installed Guard.
+    GUARD=$DEVELOPMENT_GUARD
 elif [ -r "$SYSTEM_LIB_DIR/libwemeet_pw_guard.so" ]; then
     GUARD=$SYSTEM_LIB_DIR/libwemeet_pw_guard.so
 else
     GUARD=$DEVELOPMENT_GUARD
 fi
 
+LAYOUT_GUARD=${WEMEET_LAYOUT_GUARD_LIBRARY:-$(dirname -- "$GUARD")/libwemeet_layout_guard.so}
+
 if [ -n "${WEMEET_HUNK0_TOOL:-}" ]; then
     HUNK0_TOOL=$WEMEET_HUNK0_TOOL
+elif [ -x "$SCRIPT_DIR/stage_hunk0.py" ]; then
+    HUNK0_TOOL=$SCRIPT_DIR/stage_hunk0.py
 elif [ -x "$SYSTEM_LIB_DIR/stage_hunk0.py" ]; then
     HUNK0_TOOL=$SYSTEM_LIB_DIR/stage_hunk0.py
 else
     HUNK0_TOOL=$SCRIPT_DIR/stage_hunk0.py
 fi
 
+if [ -n "${WEMEET_TOOLTIP_TOOL:-}" ]; then
+    TOOLTIP_TOOL=$WEMEET_TOOLTIP_TOOL
+elif [ -x "$SCRIPT_DIR/stage_tooltip.py" ]; then
+    TOOLTIP_TOOL=$SCRIPT_DIR/stage_tooltip.py
+else
+    TOOLTIP_TOOL=$SYSTEM_LIB_DIR/stage_tooltip.py
+fi
+
 ORIGINAL_MODULE=/opt/wemeet/bin/modules/screen_share/libscreen_share_module.so
 SANDBOX_MODULE=$ORIGINAL_MODULE
 XCAST=/usr/lib/wemeet/libxcast.so
+FRAMEWORK=/usr/lib/wemeet/libwemeet_framework.so
+FRAMEWORK_OVERLAY=$FRAMEWORK
 RUNTIME_PARENT=${XDG_RUNTIME_DIR:-/tmp}
 RUNTIME_DIR=$(mktemp -d "$RUNTIME_PARENT/wemeet-screenshare-fix-$(id -u).XXXXXX")
 PATCHED_MODULE=$RUNTIME_DIR/libscreen_share_module.so
+PATCHED_FRAMEWORK=$RUNTIME_DIR/libwemeet_framework.so
 
 cleanup() {
-    rm -f -- "$PATCHED_MODULE"
+    rm -f -- "$PATCHED_MODULE" "$PATCHED_FRAMEWORK"
     rmdir -- "$RUNTIME_DIR" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -47,13 +71,12 @@ installed_package=$(/usr/bin/pacman -Q wemeet-bin 2>/dev/null || true)
     echo "Refusing: expected wemeet-bin 3.26.10.401-5, found: ${installed_package:-not installed}." >&2
     exit 1
 }
-if [ ! -r "$GUARD" ] && [ "$GUARD" = "$DEVELOPMENT_GUARD" ]; then
+if [ "$GUARD" = "$DEVELOPMENT_GUARD" ]; then
     [ -f "$PROJECT_DIR/Makefile" ] || {
         echo "Guard library not found and this is not a development checkout: $GUARD" >&2
         exit 1
     }
-    echo "[wemeet-pw-guard] rebuilding development library after reboot" >&2
-    make -C "$PROJECT_DIR" all >&2
+    make -C "$PROJECT_DIR" BUILD_DIR="$DEVELOPMENT_BUILD_DIR" all >&2
 fi
 [ -r "$GUARD" ] || {
     echo "Guard library not found: $GUARD" >&2
@@ -67,6 +90,11 @@ fi
 original_hash=$(sha256sum "$ORIGINAL_MODULE"); original_hash=${original_hash%% *}
 xcast_hash=$(sha256sum "$XCAST"); xcast_hash=${xcast_hash%% *}
 launcher_hash=$(sha256sum /usr/bin/wemeet); launcher_hash=${launcher_hash%% *}
+framework_hash=$(sha256sum "$FRAMEWORK"); framework_hash=${framework_hash%% *}
+[ "$framework_hash" = 2118f17803de4fb8e02b44d273b6301f206e893f6d1024495b605648c510ed2a ] || {
+    echo "Refusing: host UI framework is not the audited original ($framework_hash)." >&2
+    exit 1
+}
 
 [ "$original_hash" = 925e7c16a5d69adaa804d1ea55aac1edc4093aacb5324948ea6f38a71abd4e16 ] || {
     echo "Refusing: host screen-share module is not original ($original_hash)." >&2
@@ -104,13 +132,32 @@ if [ "$patched_hash" != 075aef4471ed8ea87f0c9c95995981358087265987d05b656d3bf0b8
     "$HUNK0_TOOL" "$ORIGINAL_MODULE" "$PATCHED_MODULE"
 fi
 
+if [ "$TOOLTIP_FIX" = 1 ]; then
+    [ -r "$LAYOUT_GUARD" ] || {
+        echo "Layout guard library not found: $LAYOUT_GUARD" >&2
+        exit 1
+    }
+    [ -x "$TOOLTIP_TOOL" ] || {
+        echo "Tooltip staging tool not found: $TOOLTIP_TOOL" >&2
+        exit 1
+    }
+    "$TOOLTIP_TOOL" "$FRAMEWORK" "$PATCHED_FRAMEWORK"
+    framework_hash=$(sha256sum "$PATCHED_FRAMEWORK"); framework_hash=${framework_hash%% *}
+    [ "$framework_hash" = 2118f17803de4fb8e02b44d273b6301f206e893f6d1024495b605648c510ed2a ] || {
+        echo "Refusing: staged tooltip framework hash mismatch ($framework_hash)." >&2
+        exit 1
+    }
+    FRAMEWORK_OVERLAY=$PATCHED_FRAMEWORK
+fi
+
 if [ "${WEMEET_PW_GUARD_VALIDATE_ONLY:-0}" = 1 ]; then
     /usr/bin/bwrap \
         --unshare-user-try --unshare-pid \
         --proc /proc \
         --ro-bind / / \
         --ro-bind "$PATCHED_MODULE" "$SANDBOX_MODULE" \
-        /usr/bin/sha256sum "$SANDBOX_MODULE"
+        --ro-bind "$FRAMEWORK_OVERLAY" "$FRAMEWORK" \
+        /usr/bin/sha256sum "$SANDBOX_MODULE" "$FRAMEWORK"
     exit 0
 fi
 
@@ -136,17 +183,25 @@ case ":${LD_PRELOAD:-}:" in
     *":$GUARD:"*) preload=${LD_PRELOAD:-} ;;
     *) preload="$GUARD${LD_PRELOAD:+:$LD_PRELOAD}" ;;
 esac
+if [ "$TOOLTIP_FIX" = 1 ]; then
+    case ":$preload:" in
+        *":$LAYOUT_GUARD:"*) ;;
+        *) preload="$LAYOUT_GUARD:$preload" ;;
+    esac
+fi
 # Keep Tencent's wrapper first. Its RTLD_NEXT lookups must pass this guard before
 # the guard forwards them to glibc's real dlsym implementation.
 LD_PRELOAD_WRAP="/usr/lib/wemeet/libwemeetwrap.so:$preload"
 
 echo "[wemeet-pw-guard] host package remains original; Hunk 0 is sandbox-only" >&2
+echo "[wemeet-tooltip-fix] full callback lifetime guard: $TOOLTIP_FIX" >&2
 /usr/bin/bwrap \
     --new-session \
     --unshare-user-try --unshare-pid --unshare-uts --unshare-cgroup-try \
     --proc /proc \
     --ro-bind / / \
     --ro-bind "$PATCHED_MODULE" "$SANDBOX_MODULE" \
+    --ro-bind "$FRAMEWORK_OVERLAY" "$FRAMEWORK" \
     --dev-bind /dev /dev \
     --bind /tmp /tmp \
     --ro-bind /dev/null /proc/cpuinfo \
@@ -159,5 +214,6 @@ echo "[wemeet-pw-guard] host package remains original; Hunk 0 is sandbox-only" >
     --bind-try "$KDE_ICON_CACHE_FILE" "$KDE_ICON_CACHE_FILE" \
     --bind "$WEMEET_APP_DIR" "$WEMEET_APP_DIR" \
     --setenv WEMEET_PW_GUARD "$GUARD_ACTIVE" \
+    --setenv WEMEET_TOOLTIP_FIX "$TOOLTIP_FIX" \
     --setenv LD_PRELOAD "$LD_PRELOAD_WRAP" \
     /opt/wemeet/bin/wemeetapp "$@"

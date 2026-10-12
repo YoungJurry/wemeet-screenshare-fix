@@ -1,11 +1,13 @@
 # 腾讯会议 Wayland 屏幕共享修复（实验性）
 
-这是面向 Hyprland/XDPH 的腾讯会议 `3.26.10.401-5` 屏幕共享实验性修复。
+这是面向 Hyprland/XDPH 的腾讯会议 `3.26.10.401-5` 屏幕共享实验性修复，
+并包含共享选项 ⓘ 提示气泡的布局重入修复。
 仓库不包含腾讯二进制、编译产物、core dump 或私人日志。
 
 > **严格版本绑定：** 补丁和启动器仅支持 Arch/CachyOS 的
-> `wemeet-bin 3.26.10.401-5`。`tools/stage_hunk0.py` 与
-> `tools/run-guarded.sh` 内置了经过验证的 SHA-256 白名单，遇到任何其他二进制
+> `wemeet-bin 3.26.10.401-5`。`tools/stage_hunk0.py`、
+> `tools/stage_tooltip.py` 与 `tools/run-guarded.sh` 内置了经过验证的 SHA-256
+> 白名单，遇到任何其他二进制
 > 都会拒绝执行。腾讯会议升级后必须重新审计所有偏移，不能复用现有补丁。
 >
 > AUR 构建过程会使用 `patchelf` 重写 `libxcast.so` 的 RUNPATH。不同版本的
@@ -27,7 +29,7 @@ TOCTOU 竞态：检查完成后，映射可能在复制过程中被另一线程�
 
 ## 完整修复由什么组成
 
-当前可工作的实验方案分为三层：
+当前实验方案包含屏幕共享的三层修复，以及一个独立的 UI 修复：
 
 1. **Portal 调用顺序——上游 Hunk 0**
    让腾讯会议等待异步 `SelectSources` 响应完成后再调用 `Start`，修复
@@ -40,6 +42,12 @@ TOCTOU 竞态：检查完成后，映射可能在复制过程中被另一线程�
 3. **生命周期安全——本仓库的 PipeWire Guard**
    在 PipeWire 仍保证帧有效时创建快照，保持镜像缓冲区长期映射，在 queue
    前恢复生产者原始指针，并拒绝 buffer 移除或 stream 销毁后的迟到 queue。
+4. **共享选项提示气泡——布局闭包快照**
+   “同时共享电脑声音”和“视频流畅度优先”右侧 ⓘ 的布局回调可能在执行
+   子布局时被重入替换。独立 C++ Guard 在调用前复制完整的
+   `std::function`，隔离闭包存储并保留拥有型捕获，返回或抛出异常后自动
+   释放。不关闭 tooltip、不吞掉崩溃；腾讯 UI framework 指令保持原样。
+   详见 [崩溃分析、生命周期修复与验证边界](docs/tooltip-reentrancy.md)。
 
 Hunk 0、`straight` 和最初用于排查的 `force_shm` 方案均来自上游。本仓库
 新增的工作是独立实现的 PipeWire buffer 生命周期守卫、mock/压力测试、严格
@@ -75,11 +83,15 @@ PipeWire API。
 
 - x86-64 Arch/CachyOS、Hyprland 和 `xdg-desktop-portal-hyprland`；
 - 与内置哈希完全一致的 `wemeet-bin 3.26.10.401-5`；
-- PipeWire 开发头文件、C 编译器、`make`、`pkg-config`、Python 3 和
+- PipeWire 开发头文件、C/C++ 编译器、GNU libstdc++、`make`、`pkg-config`、Python 3 和
   bubblewrap；
 - `desktop-file-utils` 仅用于校验桌面入口和刷新应用菜单缓存。
 
 ## Arch/CachyOS 软件包安装
+
+> 当前 `packaging/arch/PKGBUILD` 仍固定下载已发布的 `v0.1.2`，**不包含
+> 本分支的新 UI 守卫**。要测试本次悬停修复，请按下面“安装与启动”从
+> 当前 checkout 运行。发布新标签并更新归档哈希前，不能用旧包代替测试。
 
 仓库在 [`packaging/arch/`](packaging/arch/) 中提供固定版本的 `PKGBUILD`。
 它只下载并构建本仓库的 MIT 源码，不包含或重新分发腾讯会议二进制。
@@ -124,6 +136,12 @@ sudo pacman -Rns wemeet-screenshare-fix
 make clean test
 ```
 
+`make test` 还运行 UI 生命周期测试：严格 hash/staging 拒绝策略、
+2,000 次双指针小对象闭包覆写、2,000 次拥有型捕获替换、坐标保持、
+非目标调用透传、空回调异常与抛出时的 RAII 清理。测试不加载腾讯库、
+不联网、不生成 core；离线回归不代替真实 UI、共享和退出测试。
+仅运行这部分可使用 `make test-tooltip`。
+
 mock PipeWire 测试覆盖：
 
 - 帧快照和原始指针恢复；
@@ -160,21 +178,33 @@ make clean test
 ./tools/run-guarded.sh
 ```
 
-启动器会检查已安装包必须为 `wemeet-bin 3.26.10.401-5`，并验证三个腾讯
-会议文件的哈希。其中 `libxcast.so` 接受由已审核 `patchelf` 版本生成的有限
+启动器会检查已安装包必须为 `wemeet-bin 3.26.10.401-5`，默认验证四个
+腾讯会议文件的哈希（含 UI framework）。其中 `libxcast.so` 接受由已审核 `patchelf` 版本生成的有限
 精确哈希集合，其他文件和未知构建仍会被拒绝。它在 `$XDG_RUNTIME_DIR` 的
-唯一临时目录中创建经过验证的 Hunk 0 副本，并且只在腾讯会议 bubblewrap
-mount namespace 内覆盖该文件，因此主机软件包保持原版。腾讯会议退出后，
-启动器会删除该临时副本。
+唯一临时目录中创建经过验证的 Hunk 0 和 UI framework 副本，并且只在
+腾讯会议 bubblewrap mount namespace 内覆盖这些文件，因此主机软件包
+保持原版。UI framework 副本与原文件逐字节一致，修复由仅在该进程加载的
+`libwemeet_layout_guard.so` 完成。腾讯会议退出后，启动器会删除两个临时副本。
 
-从源码运行时，Guard 编译产物仍只写入 `/tmp`，重启后由启动器自动重建。
+`WEMEET_TOOLTIP_FIX=0 ./tools/run-guarded.sh` 可单独关闭 UI 补丁做受控对照，
+不会关闭 PipeWire Guard；不要在重要会议里故意触发未修复版本的 ⓘ。
+`WEMEET_PW_GUARD_VALIDATE_ONLY=1 ./tools/run-guarded.sh` 只校验副本与挂载，
+不启动腾讯会议。
+
+checkout 启动时优先使用当前源码和 staging 工具，不会静默使用旧安装包。
+`WEMEET_PW_GUARD_BUILD_DIR=/tmp/独立目录` 可设置开发 Guard 的编译位置。
+现有 `v0.1.2` 包的归档没有新增 UI 补丁；正式发布新版本前请从 checkout
+运行，不要将旧发布包视作包含这次修改。
+
+从源码运行时，Guard 编译产物默认仍只写入 `/tmp`，启动器通过 `make`
+按需重建。
 系统包则可执行：
 
 ```sh
 make BUILD_DIR="$PWD/build" DESTDIR="$pkgdir" install
 ```
 
-将 Guard、Hunk 0 staging 工具、系统启动器和独立 desktop 安装到标准 `/usr`
+将两个 Guard、两个 staging 工具、系统启动器和独立 desktop 安装到标准 `/usr`
 路径；该安装目标同样不会修改腾讯会议文件或任何用户配置。
 
 普通 `wemeet` 命令仍会启动未修复的官方版本。腾讯自带的
@@ -212,6 +242,12 @@ Guard 在实际 `add_buffer` 事件中确认 `n_datas=1`、`spa_data.type=2`，�
 `SPA_DATA_MemFd`；XDPH 同时记录 `Building modifiers for dma` 和随后实际请求
 `wl_shm` buffer。这证明前一条日志只是发布 DMA 候选，并不表示腾讯会议最终
 使用 DMA-BUF。本次测试同样没有产生 Wemeet core dump。
+
+2026-10-12 新增 UI 回归：首版裸指针指令快照虽恢复了气泡，却在退出时
+产生两次堆损坏 SIGABRT，因此已撤销，不能发布。当前实现改为完整回调
+副本；用户验证两个 ⓘ、共享开始/停止及关闭窗口均正常，程序正常退出后
+没有新 core。本轮记录 7,134 次布局回调快照、205 帧捕获；完整经过见
+[UI 生命周期分析](docs/tooltip-reentrancy.md)。UI framework 指令保持原样。
 
 这些结果是有希望的开发阶段证据，但还不能视为长期稳定性保证。欢迎在严格
 匹配版本的前提下测试并提交不包含私人数据的日志摘要或问题报告。
