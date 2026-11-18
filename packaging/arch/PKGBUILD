@@ -16,7 +16,7 @@ depends=(
   'xdg-desktop-portal-hyprland'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('f3785e46709655475ffe634cfaa06e34447adcf26fa4dc9461834ff4b38da852')
 
 build() {
   make -C "$pkgname-$pkgver" BUILD_DIR="$srcdir/build" all
