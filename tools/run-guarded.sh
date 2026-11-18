@@ -63,11 +63,13 @@ if [ -r /opt/wemeet/lib/libxcast.so ] && [ -r /opt/wemeet/lib/libwemeet_framewor
     deb_layout=1
 fi
 if [ "$REQUESTED_LAYOUT" = auto ]; then
-    if [ "$arch_layout" = 1 ] && [ "$deb_layout" = 1 ]; then
-        echo "Refusing: both AUR and deb layouts are present; set WEMEET_LAYOUT=arch or deb." >&2
-        exit 1
-    elif [ "$arch_layout" = 1 ]; then
+    # Prefer the AUR paths when both layouts exist, preserving the behaviour of
+    # existing Arch/CachyOS installations. The override selects the deb branch.
+    if [ "$arch_layout" = 1 ]; then
         MEETING_LAYOUT=arch
+        if [ "$deb_layout" = 1 ]; then
+            echo "[wemeet-pw-guard] both layouts found; preferring AUR (set WEMEET_LAYOUT=deb to override)" >&2
+        fi
     elif [ "$deb_layout" = 1 ]; then
         MEETING_LAYOUT=deb
     else
@@ -119,6 +121,13 @@ case "$MEETING_LAYOUT" in
         XCAST_HASHES="79e4d43d90d2f6a67834995d0dcd8ba4c49be1b934c2cfabef5f0e4894535dad"
         ;;
 esac
+if [ "$MEETING_LAYOUT" = arch ]; then
+    installed_package=$(/usr/bin/pacman -Q wemeet-bin 2>/dev/null || true)
+    [ "$installed_package" = "wemeet-bin 3.26.10.401-5" ] || {
+        echo "Refusing: expected wemeet-bin 3.26.10.401-5, found: ${installed_package:-not installed}." >&2
+        exit 1
+    }
+fi
 FRAMEWORK_OVERLAY=$FRAMEWORK
 RUNTIME_PARENT=${XDG_RUNTIME_DIR:-/tmp}
 RUNTIME_DIR=$(mktemp -d "$RUNTIME_PARENT/wemeet-screenshare-fix-$(id -u).XXXXXX")
@@ -134,8 +143,8 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-BWRAP=$(command -v bwrap 2>/dev/null || true)
-[ -n "$BWRAP" ] || {
+BWRAP=/usr/bin/bwrap
+[ -x "$BWRAP" ] || {
     echo "Refusing: bubblewrap is required for an isolated Hunk 0 overlay." >&2
     exit 1
 }
@@ -227,8 +236,10 @@ fi
 export QT_AUTO_SCREEN_SCALE_FACTOR=1
 export QT_STYLE_OVERRIDE=fusion
 export IBUS_USE_PORTAL=1
-export LD_LIBRARY_PATH="$APP_LIB_DIR:/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export QT_PLUGIN_PATH="$APP_PLUGIN_DIR"
+export LD_LIBRARY_PATH="$APP_LIB_DIR:${LD_LIBRARY_PATH:-/usr/lib}"
+if [ "$MEETING_LAYOUT" = deb ]; then
+    export QT_PLUGIN_PATH="$APP_PLUGIN_DIR"
+fi
 export QT_QPA_PLATFORM=xcb
 export XDG_SESSION_TYPE=x11
 unset WAYLAND_DISPLAY

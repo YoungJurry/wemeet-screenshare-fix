@@ -247,7 +247,8 @@ make clean test
 
 checkout 启动时优先使用当前源码及 staging 工具，不会静默使用旧安装包。
 `WEMEET_PW_GUARD_BUILD_DIR=/tmp/独立目录` 可设置开发 Guard 的编译位置。
-新发布的 `v0.1.4` 包含此 UI 布局回调守卫，并新增官方 deb/RPM 布局支持。
+新发布的 `v0.1.5` 包含此 UI 布局回调守卫，并新增官方 deb/RPM 布局支持；
+AUR/Arch 的包版本校验、启动路径和 `LD_PRELOAD` 顺序保持不变。
 
 从源码运行时，Guard 编译产物默认仍只写入 `/tmp`，启动器通过 `make`
 按需重建。
