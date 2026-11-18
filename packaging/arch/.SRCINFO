@@ -13,6 +13,6 @@ pkgbase = wemeet-screenshare-fix
 	depends = wemeet-bin=3.26.10.401-5
 	depends = xdg-desktop-portal-hyprland
 	source = wemeet-screenshare-fix-0.1.4.tar.gz::https://github.com/YoungJurry/wemeet-screenshare-fix/archive/refs/tags/v0.1.4.tar.gz
-	sha256sums = SKIP
+	sha256sums = c87c5ac78d06880b6d129ea214639a0b909d105fb9d16dac9edaa06ab1e2509f
 
 pkgname = wemeet-screenshare-fix
