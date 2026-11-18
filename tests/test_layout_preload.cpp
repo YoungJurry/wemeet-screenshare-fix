@@ -24,8 +24,12 @@ struct Counter {
 extern "C" __attribute__((visibility("default")))
 int dladdr(const void *address, Dl_info *info) noexcept {
     *info = {};
-    info->dli_fname = caller_mode == 2 ? "/tmp/not-the-audited-framework.so" :
-                                       "/usr/lib/wemeet/libwemeet_framework.so";
+    if (caller_mode == 2)
+        info->dli_fname = "/tmp/not-the-audited-framework.so";
+    else if (caller_mode == 4)
+        info->dli_fname = "/opt/wemeet/lib/libwemeet_framework.so";
+    else
+        info->dli_fname = "/usr/lib/wemeet/libwemeet_framework.so";
     info->dli_fbase = reinterpret_cast<void *>(
         reinterpret_cast<std::uintptr_t>(address) -
         (caller_mode == 3 ? 0x917f44 : 0x917f45));
@@ -49,7 +53,15 @@ int main() {
     hook(&source, 0, 0);
     assert(source.target<Counter>()->n == 4);
 
+    // The official deb keeps the audited framework in /opt/wemeet/lib.
     setenv("WEMEET_TOOLTIP_FIX", "1", 1);
+    caller_mode = 4;
+    int deb_calls = 0;
+    Callback deb_source = [&deb_calls](double, double) { ++deb_calls; };
+    hook(&deb_source, 0, 0);
+    assert(deb_calls == 1);
+
+    caller_mode = 1;
     bool copied_capture_survived = false;
     auto owner = std::make_shared<int>(42);
     std::weak_ptr<int> weak = owner;

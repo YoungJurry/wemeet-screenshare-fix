@@ -11,7 +11,12 @@ import hashlib
 import os
 from pathlib import Path
 
-ORIGINAL_SHA256 = "2118f17803de4fb8e02b44d273b6301f206e893f6d1024495b605648c510ed2a"
+# The same framework code is shipped under two package layouts. The Arch AUR
+# build has a rewritten RUNPATH; the official deb keeps Tencent's original ELF.
+ORIGINAL_SHA256S = frozenset({
+    "2118f17803de4fb8e02b44d273b6301f206e893f6d1024495b605648c510ed2a",  # AUR
+    "b6cb7bac32b3fe2cd7b76cc6104380c7d922eac2410a86ce9ab82d3783213d79",  # deb
+})
 
 
 def digest(data: bytes) -> str:
@@ -25,7 +30,7 @@ def stage(input_path: Path, output_path: Path) -> None:
         raise ValueError("refusing staging through a hard link")
     original = input_path.read_bytes()
     actual = digest(original)
-    if actual != ORIGINAL_SHA256:
+    if actual not in ORIGINAL_SHA256S:
         raise ValueError(f"input SHA-256 mismatch: {actual}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)

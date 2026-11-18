@@ -20,7 +20,8 @@ class StagingTests(unittest.TestCase):
     fixture = b"unmodified synthetic ELF fixture"
 
     def stage(self, source, destination):
-        with patch.object(stager, "ORIGINAL_SHA256", stager.digest(self.fixture)), \
+        with patch.object(stager, "ORIGINAL_SHA256S",
+                          frozenset({stager.digest(self.fixture)})), \
                 contextlib.redirect_stdout(io.StringIO()):
             stager.stage(source, destination)
 
@@ -36,6 +37,9 @@ class StagingTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 self.stage(source, output)
             self.assertEqual(output.read_bytes(), self.fixture)
+
+    def test_production_accepts_both_verified_layouts(self):
+        self.assertEqual(len(stager.ORIGINAL_SHA256S), 2)
 
     def test_production_rejects_unknown_binary_without_output(self):
         with tempfile.TemporaryDirectory() as directory:

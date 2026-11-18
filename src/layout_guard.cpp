@@ -40,7 +40,12 @@ bool target_caller(void *caller) {
         return false;
     // Only this version's Placeable::PlaceAt PLT call is protected. Other
     // std::function<void(double,double)> users retain direct invocation.
-    return std::strcmp(info.dli_fname, "/usr/lib/wemeet/libwemeet_framework.so") == 0 &&
+    // The AUR package moves the library to /usr/lib/wemeet; the official deb
+    // leaves it in /opt/wemeet/lib. RUNPATH changes do not move this code.
+    const bool audited_framework =
+        std::strcmp(info.dli_fname, "/usr/lib/wemeet/libwemeet_framework.so") == 0 ||
+        std::strcmp(info.dli_fname, "/opt/wemeet/lib/libwemeet_framework.so") == 0;
+    return audited_framework &&
            reinterpret_cast<std::uintptr_t>(caller) -
                reinterpret_cast<std::uintptr_t>(info.dli_fbase) == 0x917f45;
 }

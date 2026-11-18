@@ -1,6 +1,7 @@
 # 共享选项 ⓘ 提示气泡：布局回调的重入生命周期
 
-适用范围：完整 SHA-256 校验通过的 `wemeet-bin 3.26.10.401-5`；
+适用范围：完整 SHA-256 校验通过的腾讯会议 `3.26.10.401`（x86-64），
+包括 AUR `wemeet-bin 3.26.10.401-5` 与保留原始 ELF 的官方 deb；
 Linux x86-64 / GNU libstdc++。此守卫与 PipeWire Guard 独立。
 仓库不存放腾讯 ELF、截图、core 或私人日志。
 
@@ -56,7 +57,8 @@ weak ELF 符号 `_ZNKSt8functionIFvddEEclEdd`
 只有同时满足以下条件才建立副本：
 
 1. 启动器启用 `WEMEET_TOOLTIP_FIX=1`；
-2. `dladdr` 确认调用者来自 `/usr/lib/wemeet/libwemeet_framework.so`；
+2. `dladdr` 确认调用者来自 `/usr/lib/wemeet/libwemeet_framework.so`（AUR）
+   或 `/opt/wemeet/lib/libwemeet_framework.so`（官方 deb）；
 3. 调用返回地址严格等于该文件 `+0x917f45`，
    即 `Placeable::PlaceAt` 的已审核 PLT 调用点。
 

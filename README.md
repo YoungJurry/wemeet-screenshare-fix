@@ -1,19 +1,20 @@
 # 腾讯会议 Wayland 屏幕共享修复（实验性）
 
-这是面向 Hyprland/XDPH 的腾讯会议 `3.26.10.401-5` 屏幕共享实验性修复，
+这是面向 Hyprland/XDPH 的腾讯会议 `3.26.10.401` 屏幕共享实验性修复，
 并包含共享选项 ⓘ 提示气泡的布局重入修复。
 仓库不包含腾讯二进制、编译产物、core dump 或私人日志。
 
-> **严格版本绑定：** 补丁和启动器仅支持 Arch/CachyOS 的
-> `wemeet-bin 3.26.10.401-5`。`tools/stage_hunk0.py`、
-> `tools/stage_tooltip.py` 与 `tools/run-guarded.sh` 内置了经过验证的 SHA-256
-> 白名单，遇到任何其他二进制
-> 都会拒绝执行。腾讯会议升级后必须重新审计所有偏移，不能复用现有补丁。
+> **严格版本绑定：** 补丁和启动器仅支持上游腾讯会议 `3.26.10.401`
+> （x86-64）中经 SHA-256 审计的构建。目前核对过的布局是 Arch/CachyOS AUR
+> `wemeet-bin 3.26.10.401-5`，以及腾讯官方 `wemeet 3.26.10.401` deb；
+> 由该 deb 转换且文件字节不变的 RPM 使用相同布局。其他构建、其他发行版
+> 重打包或任何被修改的二进制都会被拒绝。`-5` 是 AUR 包修订号，不是腾讯
+> 版本号。腾讯会议升级后必须重新审计所有偏移，不能复用现有补丁。
 >
-> AUR 构建过程会使用 `patchelf` 重写 `libxcast.so` 的 RUNPATH。不同版本的
-> `patchelf` 会从同一份腾讯官方文件生成字节不同但代码和动态链接配置相同的
-> ELF 布局；启动器只接受已从官方 deb 可重复生成并审核过的精确哈希，不会
-> 因此放宽对未知文件或其他屏幕共享 Hook 的拒绝。
+> AUR 构建过程会使用 `patchelf` 重写 RUNPATH；官方 deb 保留腾讯原始 ELF。
+> 启动器自动识别 AUR 或 deb 布局，并按文件 SHA-256 验证，不按发行版或
+> 包名判断；只接受已从官方 deb 可重复生成并审核过的精确哈希，不会因此
+> 放宽对未知文件或其他屏幕共享 Hook 的拒绝。
 
 ## 问题说明
 
@@ -81,8 +82,11 @@ PipeWire API。
 
 ## 环境要求
 
-- x86-64 Arch/CachyOS、Hyprland 和 `xdg-desktop-portal-hyprland`；
-- 与内置哈希完全一致的 `wemeet-bin 3.26.10.401-5`；
+- x86-64 Linux、Hyprland 和 `xdg-desktop-portal-hyprland`；
+- Arch/CachyOS：与内置哈希一致的 `wemeet-bin 3.26.10.401-5`；
+- Debian/Ubuntu：与内置哈希一致的腾讯官方 `wemeet 3.26.10.401` deb；
+- RPM：仅支持由同一 deb 转换且文件字节一致的包，或其他已加入哈希白名单的
+  官方 RPM；
 - PipeWire 开发头文件、C/C++ 编译器、GNU libstdc++、`make`、`pkg-config`、Python 3 和
   bubblewrap；
 - `desktop-file-utils` 仅用于校验桌面入口和刷新应用菜单缓存。
@@ -123,6 +127,43 @@ sudo pacman -Rns wemeet-screenshare-fix
 
 在 AUR 包正式发布前，这种本地 `makepkg -si` 安装方式不会被 `yay -Syu`
 自动升级；更新时需要重新拉取本仓库并构建。
+
+## Debian/Ubuntu（官方 deb）
+
+先安装构建依赖，并确认腾讯会议版本为 `3.26.10.401`：
+
+```sh
+sudo apt install build-essential pkg-config libpipewire-0.3-dev \
+    python3 bubblewrap desktop-file-utils
+dpkg-query -W -f='${Version}\n' wemeet
+# 必须输出：3.26.10.401
+```
+
+从源码构建并安装到 `/usr`：
+
+```sh
+git clone https://github.com/YoungJurry/wemeet-screenshare-fix.git
+cd wemeet-screenshare-fix
+make clean test
+sudo make install
+```
+
+安装后运行 `wemeet-wayland-guard`。启动器会自动选择 `deb` 布局，验证
+`/opt/wemeet/lib` 下的官方文件，并只在沙箱内覆盖 Hunk 0 与 UI framework。
+
+## Fedora/RPM
+
+公开的 `3.26.10.401` 安装包是 deb；若使用 `alien` 等工具转换，得到的 RPM
+通常保留 `/opt/wemeet` 布局和相同文件字节，启动器会按 deb 布局处理。如果
+使用腾讯提供的官方 RPM，则必须先核对四个文件的 SHA-256 并加入白名单，
+否则会被拒绝。
+
+```sh
+sudo dnf install gcc gcc-c++ make pkgconf pipewire-devel \
+    python3 bubblewrap desktop-file-utils
+make clean test
+sudo make install
+```
 
 ## 构建与测试
 
@@ -174,9 +215,11 @@ make clean test
 ./tools/run-guarded.sh
 ```
 
-启动器会检查已安装包必须为 `wemeet-bin 3.26.10.401-5`，默认验证四个
-腾讯会议文件的哈希（含 UI framework）。其中 `libxcast.so` 接受由已审核 `patchelf` 版本生成的有限
-精确哈希集合，其他文件和未知构建仍会被拒绝。它在 `$XDG_RUNTIME_DIR` 的
+启动器会自动识别 AUR（`/usr/lib/wemeet`）或官方 deb（`/opt/wemeet/lib`）
+布局，默认验证四个腾讯会议文件的哈希（含 UI framework）。其中 AUR 的
+`libxcast.so` 接受由已审核 `patchelf` 版本生成的有限精确哈希集合；deb 则
+接受腾讯原始 `libxcast.so`。其他文件和未知构建仍会被拒绝。布局检测有歧义
+时可显式指定 `WEMEET_LAYOUT=arch` 或 `WEMEET_LAYOUT=deb`。它在 `$XDG_RUNTIME_DIR` 的
 唯一临时目录中创建经过验证的 Hunk 0 和 UI framework 副本，并且只在
 腾讯会议 bubblewrap mount namespace 内覆盖这些文件，因此主机软件包
 保持原版。UI framework 副本与原文件逐字节一致，修复由仅在该进程加载的
@@ -202,9 +245,10 @@ make BUILD_DIR="$PWD/build" DESTDIR="$pkgdir" install
 将两个 Guard、两个 staging 工具、系统启动器和独立 desktop 安装到标准 `/usr`
 路径；该安装目标同样不会修改腾讯会议文件或任何用户配置。
 
-普通 `wemeet` 命令仍会启动未修复的官方版本。腾讯自带的
+普通 `wemeet` 命令仍会启动未修复的官方版本。AUR 包额外提供的
 `libwemeetwrap.so` 必须位于 `LD_PRELOAD` 首位；若 Guard 排在它前面，会
 破坏 wrapper 的 `RTLD_NEXT` 查找，导致腾讯会议只有后台进程而不显示窗口。
+官方 deb 不包含这个 wrapper，启动器不会把它加入 `LD_PRELOAD`。
 
 可以安装一个独立应用菜单入口，不会覆盖官方入口：
 
@@ -240,5 +284,10 @@ Guard 在实际 `add_buffer` 事件中确认 `n_datas=1`、`spa_data.type=2`，�
 
 
 
-这些结果是有希望的开发阶段证据，但还不能视为长期稳定性保证。欢迎在严格
-匹配版本的前提下测试并提交不包含私人数据的日志摘要或问题报告。
+官方 deb 布局已完成离线核对：module、framework、`libxcast.so`、启动器
+文件哈希，以及 Hunk 0 的五个偏移和补丁输出均与上述白名单一致。目前尚未
+在真实 Debian/Ubuntu/Fedora 桌面完成端到端共享测试，因此这些发行版暂不
+宣称已通过真实会议验证；欢迎在严格匹配版本的前提下测试并提交不包含私人
+数据的布局、哈希和日志摘要。
+
+这些结果是有希望的开发阶段证据，但还不能视为长期稳定性保证。
